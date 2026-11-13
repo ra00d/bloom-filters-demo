@@ -1,124 +1,144 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Bloom Filters Demo
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+A small **NestJS + Drizzle ORM + SQLite** demo that adds a Bloom filter in front of user lookups.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+It exposes the same lookup twice — once directly against SQLite and once guarded by a Bloom filter — so the difference is easy to see:
 
-## Description
+- `GET /users/:id` always queries the database.
+- `GET /users/:id/bloom` checks the filter first and only queries the database when the filter says the ID may exist.
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## Requirements
 
-## Project setup
+- Node.js 24+ (the project uses the built-in `node:sqlite` driver)
+- pnpm
+
+## Setup
+
+Install the existing dependencies:
 
 ```bash
-$ pnpm install
+pnpm install
 ```
 
-## Compile and run the project
+Create `.env`:
 
 ```bash
-# development
-$ pnpm run start
-
-# watch mode
-$ pnpm run start:dev
-
-# production mode
-$ pnpm run start:prod
+cp .env.example .env
 ```
 
-## Run tests
+Create the `users` table manually with your preferred SQLite client. **This project intentionally does not include migrations.**
+
+```sql
+CREATE TABLE users (
+  id TEXT PRIMARY KEY NOT NULL,
+  email TEXT NOT NULL,
+  name TEXT NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('admin', 'user'))
+);
+```
+
+For example, using the SQLite CLI:
 
 ```bash
-# unit tests
-$ pnpm run test
-
-# e2e tests
-$ pnpm run test:e2e
-
-# test coverage
-$ pnpm run test:cov
+sqlite3 bloom_filters.db <<'SQL'
+CREATE TABLE users (
+  id TEXT PRIMARY KEY NOT NULL,
+  email TEXT NOT NULL,
+  name TEXT NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('admin', 'user'))
+);
+SQL
 ```
 
-## Deployment
-
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+Start the application:
 
 ```bash
-$ pnpm install -g @nestjs/mau
-$ mau deploy
+pnpm start:dev
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+## API
 
-## Observability
-
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
-
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
-
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
-
-To add it to this project:
+### Create a user
 
 ```bash
-$ pnpm install @nestjs/observe
+curl -X POST http://localhost:3000/users \
+  -H 'content-type: application/json' \
+  -d '{"email":"ada@example.com","name":"Ada Lovelace","role":"admin"}'
 ```
 
-Then follow the [setup guide](https://docs.nestjs.com/observability/overview) - it takes a single import and an app key.
+`role` is optional and defaults to `user`. The generated UUID is added to the Bloom filter before the row is inserted, so a failed insert can only produce a false positive, never a false negative.
 
-The free plan needs no payment details and covers 300,000 events a month. You can also browse the [live demo](https://www.observe-demo.nestjs.com/dashboard) first - the whole dashboard over a busy service's data, with nothing to install.
+### Direct database lookup
 
-## Resources
+```bash
+curl http://localhost:3000/users/<uuid>
+```
 
-Check out a few resources that may come in handy when working with NestJS:
+```json
+{
+  "found": true,
+  "user": {
+    "id": "7f9c...",
+    "email": "ada@example.com",
+    "name": "Ada Lovelace",
+    "role": "admin"
+  },
+  "lookup": {
+    "strategy": "database",
+    "bloomChecked": false,
+    "dbQueried": true,
+    "durationUs": 31.4
+  }
+}
+```
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observe](https://observe.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+### Bloom-filtered lookup
 
-## Support
+```bash
+curl http://localhost:3000/users/<uuid>/bloom
+```
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+When the filter can rule the ID out:
 
-## Stay in touch
+```json
+{
+  "found": false,
+  "user": null,
+  "lookup": {
+    "strategy": "bloom",
+    "bloomChecked": true,
+    "maybePresent": false,
+    "dbQueried": false,
+    "durationUs": 11.8
+  }
+}
+```
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+The response is `404`, but the SQLite query was skipped. When the filter has a false positive, the database is queried and `lookup.falsePositive` is `true`.
 
-## License
+### A note about SQLite
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+SQLite is embedded and indexed primary-key lookups are already extremely fast. In local benchmarks, a Bloom check can cost a similar amount of time to the SQLite lookup itself, so the guarded path is not automatically faster for hits. The Bloom filter's advantage shows up when:
+
+- the database is remote and every avoided query saves network I/O and server work;
+- the dataset is large enough that index lookups are expensive;
+- most lookups miss (for example, bot traffic or enumeration attempts);
+- the key set is much larger than the available memory for a full cache/set.
+
+## Configuration
+
+| Variable                           |            Default | Description                               |
+| ---------------------------------- | -----------------: | ----------------------------------------- |
+| `DATABASE_URL`                     | `bloom_filters.db` | SQLite file path                          |
+| `PORT`                             |             `3000` | HTTP port                                 |
+| `BLOOM_FILTER_FALSE_POSITIVE_RATE` |             `0.01` | Target false-positive rate                |
+| `BLOOM_FILTER_CAPACITY_MARGIN`     |              `1.3` | Extra capacity to reduce early saturation |
+
+## How the filter is maintained
+
+- On startup, the service loads all user IDs and builds the filter in-process.
+- The filter is sized from the current user count, the capacity margin, and the target false-positive rate.
+- `POST /users` adds new IDs at runtime.
+- The filter is per-process. If you insert rows directly into SQLite while the app is running, restart the app (or add a rebuild endpoint) to include them.
+- Standard Bloom filters cannot delete individual entries. Deleted IDs may still be reported as “maybe present”, which only causes an unnecessary database query.
+- Bloom filters are probabilistic: they can produce false positives, but never false negatives when correctly synchronized.
