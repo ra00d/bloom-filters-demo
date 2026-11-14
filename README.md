@@ -7,6 +7,56 @@ It exposes the same lookup twice — once directly against SQLite and once guard
 - `GET /users/:id` always queries the database.
 - `GET /users/:id/bloom` checks the filter first and only queries the database when the filter says the ID may exist.
 
+## System flow
+
+```mermaid
+flowchart TD
+    subgraph startup["Application startup"]
+        S1["dotenv loads .env"] --> S2["NestFactory creates AppModule"]
+        S2 --> S3["ConfigModule validates environment variables"]
+        S3 --> S4["Drizzle opens the SQLite database"]
+        S4 --> S5["BloomFilterService reads all users.id values"]
+        S5 --> S6["Build the in-memory Bloom filter"]
+        S6 --> S7["HTTP server starts"]
+    end
+
+    DB[("SQLite users table")]
+    BF(["In-memory Bloom filter"])
+
+    subgraph write["POST /users"]
+        W1["Validate email, name and role"] --> W2["Generate a UUID"]
+        W2 --> W3["bloom.add(id)"]
+        W3 --> W4[("INSERT INTO users")]
+        W4 --> W5["201 Created"]
+    end
+
+    subgraph direct["GET /users/:id — without Bloom filter"]
+        D1["Receive id"] --> D2[("SELECT * FROM users WHERE id = ?")]
+        D2 --> D3{"Row found?"}
+        D3 -->|yes| D4["200 + user"]
+        D3 -->|no| D5["404 Not Found"]
+    end
+
+    subgraph bloom["GET /users/:id/bloom — with Bloom filter"]
+        B1["Receive id"] --> B2{"bloom.mightContain(id)?"}
+        B2 -->|definitely not| B3["404, dbQueried = false"]
+        B2 -->|maybe| B4[("SELECT * FROM users WHERE id = ?")]
+        B4 --> B5{"Row found?"}
+        B5 -->|yes| B6["200 + user"]
+        B5 -->|no| B7["404, falsePositive = true"]
+    end
+
+    S5 -.-> DB
+    S6 --> BF
+    W3 --> BF
+    W4 -.-> DB
+    B2 --> BF
+    D2 -.-> DB
+    B4 -.-> DB
+```
+
+Dashed edges indicate SQLite access. The Bloom filter lives in process memory; SQLite remains the source of truth.
+
 ## Requirements
 
 - Node.js 24+ (the project uses the built-in `node:sqlite` driver)
